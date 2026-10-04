@@ -53,10 +53,7 @@ class MainActivity : ComponentActivity() {
     }
 
     // Instagram
-    private val instagramHost = "www.instagram.com"
-    private val dmPath = "/direct/"
-    private val dmUrl =
-        "https://www.instagram.com/direct/inbox/"
+    private val dmUrl = InstagramUrls.DM_INBOX
 
     // Login state
     private var loginPhase = true
@@ -71,9 +68,8 @@ class MainActivity : ComponentActivity() {
     /*
      * true = user has enabled the exception.
      *
-     * IMPORTANT:
-     * Even when this is true, if inMessages == true,
-     * the timer is paused and restricted mode is enforced.
+     * The timer still pauses while inMessages == true,
+     * but navigation out of Messages is allowed.
      */
     private var exceptionEnabled = false
 
@@ -223,14 +219,13 @@ class MainActivity : ComponentActivity() {
                     // -------------------------------------------------
                     // EXCEPTION MODE
                     //
-                    // Exception only allows unrestricted browsing
-                    // when we are NOT inside Messages.
+                    // An armed exception must also allow leaving
+                    // Messages; the timer stays paused until then.
                     // -------------------------------------------------
 
                     if (
                         exceptionEnabled &&
-                        !exceptionManuallyPaused &&
-                        !inMessages
+                        !exceptionManuallyPaused
                     ) {
                         return GeckoResult.allow()
                     }
@@ -241,9 +236,16 @@ class MainActivity : ComponentActivity() {
 
                     if (
                         loginPhase &&
-                        host == instagramHost &&
-                        path.startsWith("/accounts/")
+                        InstagramUrls.isMetaLoginHost(host)
                     ) {
+                        return GeckoResult.allow()
+                    }
+
+                    if (
+                        InstagramUrls.isInstagramHost(host) &&
+                        InstagramUrls.isAuthPath(path)
+                    ) {
+                        loginPhase = true
                         return GeckoResult.allow()
                     }
 
@@ -252,8 +254,8 @@ class MainActivity : ComponentActivity() {
                     // -------------------------------------------------
 
                     if (
-                        host == instagramHost &&
-                        path.startsWith(dmPath)
+                        InstagramUrls.isInstagramHost(host) &&
+                        InstagramUrls.isDirectPath(path)
                     ) {
                         loginPhase = false
                         inMessages = true
@@ -273,7 +275,7 @@ class MainActivity : ComponentActivity() {
                     // Anything other than DM is blocked.
                     // -------------------------------------------------
 
-                    if (host == instagramHost) {
+                    if (InstagramUrls.isInstagramHost(host)) {
 
                         loginPhase = false
 
@@ -312,8 +314,8 @@ class MainActivity : ComponentActivity() {
                     val path = uri.path ?: "/"
 
                     val nowInMessages =
-                        host == instagramHost &&
-                                path.startsWith(dmPath)
+                        InstagramUrls.isInstagramHost(host) &&
+                                InstagramUrls.isDirectPath(path)
 
                     // -------------------------------------------------
                     // ENTERED MESSAGES
@@ -337,6 +339,21 @@ class MainActivity : ComponentActivity() {
                     // -------------------------------------------------
 
                     inMessages = false
+
+                    // Stay on login / 2FA / consent pages, including
+                    // Facebook-hosted Meta login.
+                    if (loginPhase) {
+                        if (InstagramUrls.isMetaLoginHost(host)) {
+                            return
+                        }
+
+                        if (
+                            InstagramUrls.isInstagramHost(host) &&
+                            InstagramUrls.isAuthPath(path)
+                        ) {
+                            return
+                        }
+                    }
 
                     // -------------------------------------------------
                     // Exception is active and not manually paused.
@@ -374,9 +391,7 @@ class MainActivity : ComponentActivity() {
         geckoView.setSession(session)
 
         // Initial Instagram login.
-        session.loadUri(
-            "https://www.instagram.com/accounts/login/"
-        )
+        session.loadUri(InstagramUrls.LOGIN)
 
         updateTimer()
         updateExceptionButton()
@@ -396,6 +411,11 @@ class MainActivity : ComponentActivity() {
             exceptionEnabled &&
             !exceptionManuallyPaused
         ) {
+            if (inMessages) {
+                session.loadUri(InstagramUrls.HOME)
+                return
+            }
+
             pauseExceptionManually()
             return
         }
